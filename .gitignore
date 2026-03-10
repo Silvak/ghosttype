@@ -1,0 +1,35 @@
+# Dependencias
+node_modules/
+
+# Output de WXT
+.output/
+.wxt/
+
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Coverage de tests
+coverage/
+
+# Archivos de build temporales
+dist/
