@@ -7,11 +7,11 @@ Roadmap organized into three progressive phases. Each phase builds on the previo
 ## Overall Status
 
 
-| Phase   | Name                      | Status    | Goal                                           |
-| ------- | ------------------------- | --------- | ---------------------------------------------- |
-| Phase 1 | Proof of Concept          | ⬜ Pending | Basic functional extension with text detection |
-| Phase 2 | Local Inference           | ⬜ Pending | Real Ghost Score with local ONNX model         |
-| Phase 3 | UI/UX + Advanced Features | ⬜ Pending | Complete, polished product                     |
+| Phase   | Name                      | Status         | Goal                                           |
+| ------- | ------------------------- | -------------- | ---------------------------------------------- |
+| Phase 1 | Proof of Concept          | ✅ In Progress | Basic functional extension with text detection |
+| Phase 2 | Local Inference           | ⬜ Pending     | Real Ghost Score with local ONNX model         |
+| Phase 3 | UI/UX + Advanced Features | ⬜ Pending     | Complete, polished product                     |
 
 
 ---
@@ -24,60 +24,65 @@ Roadmap organized into three progressive phases. Each phase builds on the previo
 
 ### Setup & Scaffold
 
-- Initialize project with WXT `0.20.18` + React `19.2.4` + TypeScript `5.9.3`
-- Configure Tailwind CSS `4.2.1` via `@tailwindcss/vite` in `wxt.config.ts`
-- Configure `tsconfig.json` with `isolatedModules: true` and target `ES2022`
-- Create `.gitignore` with `.output/`, `.wxt/`, `node_modules/`, `.env`
-- Verify that `pnpm dev` starts the project without errors
-- Verify that the extension loads in `chrome://extensions` from `.output/chrome-mv3/`
-- Add extension icons (16x16, 48x48, 128x128) in `public/icons/`
-- Configure Vitest `4.0.18` with `mergeConfig` from `wxt.config.ts`
+- ✅ Initialize project with WXT `0.20.18` + React `19.2.4` + TypeScript `5.9.3`
+- ✅ Configure Tailwind CSS `4.2.1` via `@tailwindcss/vite` in `wxt.config.ts`
+- ✅ Configure `tsconfig.json` with `isolatedModules: true` and target `ES2022`
+- ✅ Create `.gitignore` with `.output/`, `.wxt/`, `node_modules/`, `.env`
+- ✅ Verify that `pnpm dev` starts the project without errors
+- ✅ Verify that the extension loads in `chrome://extensions` from `.output/chrome-mv3/`
+- ⬜ Add extension icons (16x16, 48x48, 128x128) in `public/icons/`
+- ⬜ Configure Vitest `4.0.18` with `mergeConfig` from `wxt.config.ts`
 
 ### The Infiltrator — Base Content Script
 
-- Implement `defineContentScript()` in `src/entrypoints/content.ts`
-- Detect `<textarea>` and `contenteditable` elements in the DOM with `MutationObserver`
-- Apply 300ms debounce on text changes
-- Extract plain text from detected elements
-- Send text to background via `browser.runtime.sendMessage`
-- Receive response from background and apply highlights in the DOM
-- Support the following target domains: `reddit.com`, `twitter.com`, `x.com`, `news.ycombinator.com`
+- ✅ Implement `defineContentScript()` in `src/entrypoints/content.ts`
+- ✅ Detect `<textarea>` and `contenteditable` elements in the DOM with `MutationObserver`
+- ✅ Apply 300ms debounce on text changes
+- ✅ Extract plain text from detected elements
+- ✅ Send text to background via `browser.runtime.sendMessage`
+- ✅ Receive response from background and apply highlights in the DOM  
+  _Implementado como widget flotante (ring + badges) en lugar de underline en el texto._
+- ✅ Support the following target domains: `reddit.com`, `twitter.com`, `x.com`, `news.ycombinator.com`
 
 ### Leak Detector — Static Rules (v0)
 
-- Define base types in `src/types/index.ts`: `LeakEntity`, `LeakCategory`, `GhostScore`
-- Implement `src/modules/leakDetector.ts` with regex/dictionary detection
-- Create initial list of leak patterns:
+- ✅ Define base types in `src/types/index.ts`: `LeakEntity`, `LeakCategory`, `GhostScore`
+- ✅ Implement `src/modules/leakDetector.ts` with regex/dictionary detection
+- ✅ Create initial list of leak patterns:
   - City and country names
   - Professions and academic titles
-  - Common pet names
+  - Common pet names (patrones "my dog/cat/pet"; no lista explícita de nombres)
   - Specific technologies and frameworks
   - Temporal expressions ("yesterday", "last week", "back in 2019")
   - Regional dialects and idioms (initial list in Spanish and English)
-- Implement visual highlighting in the DOM with injected CSS (no Tailwind in content script)
-- Add basic tooltip on hover over a highlighted entity
-- Write unit tests for the `leakDetector` module with Vitest
+- ✅ Implement visual highlighting in the DOM with injected CSS (no Tailwind in content script)
+- ✅ Add basic tooltip on hover over a highlighted entity
+- ⬜ Write unit tests for the `leakDetector` module with Vitest
 
 ### Background Service Worker — Base
 
-- Implement `defineBackground()` in `src/entrypoints/background.ts`
-- Configure `browser.runtime.onMessage` listener to receive text from the content script
-- Implement basic response (no ML): return list of entities detected by rules
-- Add error handling and local logging
+- ✅ Implement `defineBackground()` in `src/entrypoints/background.ts`
+- ✅ Configure `browser.runtime.onMessage` listener to receive text from the content script
+- ✅ Implement basic response (no ML): return list of entities detected by rules
+- ✅ Add error handling and local logging
 
 ### Popup UI — Minimal Version
 
-- Create React app in `src/entrypoints/popup/`
-- Show extension status (active/inactive)
-- Toggle to enable/disable GhostType on the current tab
-- Show count of entities detected in the current session
+- ✅ Create React app in `src/entrypoints/popup/`
+- ✅ Show extension status (active/inactive)
+- ✅ Toggle to enable/disable GhostType on the current tab
+- ✅ Show count of entities detected in the current session
 
 ### The Vault — Initialization
 
-- Implement Dexie schema in `src/vault/schema.ts`
-- Create tables: `profiles`, `samples`, `settings`
-- Implement basic CRUD API in `src/vault/index.ts`
-- Persist user configuration (active/inactive toggle)
+- ✅ Implement Dexie schema in `src/vault/schema.ts`
+- ✅ Create tables: `profiles`, `samples`, `settings`
+- ✅ Implement basic CRUD API in `src/vault/index.ts`
+- ✅ Persist user configuration (active/inactive toggle)
+
+### Phase 1 — Pendientes
+
+- **Pendiente:** iconos en `public/icons/` (16, 48, 128), configuración de Vitest con `mergeConfig` (o `vitest.config.ts` que extienda WXT), y tests unitarios para `leakDetector`.
 
 ---
 
@@ -86,6 +91,8 @@ Roadmap organized into three progressive phases. Each phase builds on the previo
 **Goal:** Replace static rules with a real ONNX model running on WebGPU. Implement the Ghost Score with real stylometric analysis based on embeddings.
 
 **Success criteria:** The Ghost Score displays a real value (0–100) calculated by comparing the current text against the user's stylistic profile stored in IndexedDB. Inference latency is < 200ms.
+
+_Preparado: `engine/models.ts`, `ghostScore.ts`, vault `addSample`/`getBaseProfile`, `web_accessible_resources` para Transformers; falta implementar inferencia real en `engine/index.ts`._
 
 ### The Engine — Transformers.js Integration
 
