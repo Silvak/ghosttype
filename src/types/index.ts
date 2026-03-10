@@ -4,7 +4,13 @@ export type LeakCategory =
   | 'temporal'
   | 'technology'
   | 'dialect'
-  | 'personal';
+  | 'personal'
+  | 'email'
+  | 'phone'
+  | 'handle'
+  | 'organization'
+  | 'health'
+  | 'identifier';
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 

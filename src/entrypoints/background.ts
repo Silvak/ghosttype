@@ -1,11 +1,21 @@
 import type { GhostTypeMessage, GhostTypeResponse, GhostScore } from '@/types';
+import { detectLeaks } from '@/modules/leakDetector';
+import { calculateGhostScore } from '@/modules/ghostScore';
 
 export default defineBackground(() => {
+  console.log('[GhostType] Background service worker started');
+
   browser.runtime.onMessage.addListener(
     (message: GhostTypeMessage, _sender, sendResponse) => {
+      console.log('[GhostType] Message received:', message.type);
+
       if (message.type === 'ANALYZE_TEXT') {
-        handleAnalyzeText(message.payload as string)
+        const text = message.payload as string;
+        console.log('[GhostType] Analyzing text:', text.substring(0, 60) + (text.length > 60 ? '…' : ''));
+
+        handleAnalyzeText(text)
           .then((score) => {
+            console.log('[GhostType] Score result:', score.value, score.level, `(${score.leaks.length} leaks)`);
             const response: GhostTypeResponse = {
               type: 'SCORE_RESULT',
               payload: score,
@@ -13,6 +23,7 @@ export default defineBackground(() => {
             sendResponse(response);
           })
           .catch((error: unknown) => {
+            console.error('[GhostType] handleAnalyzeText error:', error);
             const response: GhostTypeResponse = {
               type: 'ERROR',
               payload: { error: String(error) },
@@ -20,7 +31,6 @@ export default defineBackground(() => {
             sendResponse(response);
           });
 
-        // Retornar true indica que sendResponse se llamará de forma asíncrona
         return true;
       }
 
@@ -36,11 +46,14 @@ export default defineBackground(() => {
 });
 
 async function handleAnalyzeText(text: string): Promise<GhostScore> {
-  // Stub — implementación real en Fase 2
-  return {
-    value: 50,
-    level: 'warning',
-    leaks: [],
-    timestamp: Date.now(),
-  };
+  const leaks = detectLeaks(text);
+  console.log('[GhostType] detectLeaks found:', leaks.length, leaks.map(l => `${l.text}[${l.category}/${l.risk}]`).join(', ') || 'none');
+
+  // Phase 1: score based on leaks only (no embeddings yet)
+  const score = calculateGhostScore([], null, leaks, text);
+
+  // Persist last score so popup and sidepanel can read it
+  await browser.storage.local.set({ lastScore: score });
+
+  return score;
 }
