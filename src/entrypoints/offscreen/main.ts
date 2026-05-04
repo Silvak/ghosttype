@@ -127,10 +127,11 @@ async function handleRewrite(msg: RewriteMessage, sendResponse: (r: unknown) => 
 
     const result = await pipe(prompt, { max_new_tokens: maxTokens, num_beams: 1 });
     const output = Array.isArray(result) ? result[0] : result;
-    const suggestion =
+    const raw =
       typeof output === 'object' && output !== null && 'generated_text' in output
         ? String((output as { generated_text: string }).generated_text).trim()
         : null;
+    const suggestion = raw !== null ? stripEchoedPrompt(raw) : null;
 
     sendResponse({ ok: true, suggestion });
   } catch (err) {
@@ -165,6 +166,19 @@ async function handleRemove(msg: RemoveMessage, sendResponse: (r: unknown) => vo
     console.error('[GhostType offscreen] remove error:', error);
     sendResponse({ ok: false, error });
   }
+}
+
+/** T5 puede devolver prefijo del prompt + continuación; nos quedamos con la cola tras el marcador. */
+function stripEchoedPrompt(generated: string): string {
+  const markers = ['\n\nRewritten:', '\nRewritten:', 'Rewritten:'];
+  for (const m of markers) {
+    const idx = generated.lastIndexOf(m);
+    if (idx !== -1) {
+      const tail = generated.slice(idx + m.length).trim();
+      if (tail.length > 0) return tail;
+    }
+  }
+  return generated.trim();
 }
 
 function isOffscreenMessage(msg: unknown): msg is OffscreenMessage {

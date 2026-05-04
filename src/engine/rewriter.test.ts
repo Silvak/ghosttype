@@ -14,6 +14,10 @@ vi.mock('./api-gateway.js', () => ({
   rewrite: vi.fn(),
 }));
 
+vi.mock('./offscreen-bridge.js', () => ({
+  sendToOffscreen: vi.fn(),
+}));
+
 // Mock chrome global for module-level try/catch in rewriter.ts
 (globalThis as unknown as Record<string, unknown>).chrome = {
   runtime: { getURL: (path: string) => `chrome-extension://test/${path}` },
@@ -29,11 +33,13 @@ import { rewrite } from './rewriter.js';
 import { getActiveApi, getActiveModelId } from '../vault/index.js';
 import { isDownloaded } from './model-manager.bg.js';
 import * as apiGateway from './api-gateway.js';
+import { sendToOffscreen } from './offscreen-bridge.js';
 
 const mockedGetActiveApi = vi.mocked(getActiveApi);
 const mockedGetActiveModelId = vi.mocked(getActiveModelId);
 const mockedIsDownloaded = vi.mocked(isDownloaded);
 const mockedApiRewrite = vi.mocked(apiGateway.rewrite);
+const mockedSendToOffscreen = vi.mocked(sendToOffscreen);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -84,6 +90,29 @@ describe('rewriter — API path', () => {
 
     expect(result.suggestion).toBeNull();
     expect(result.reason).toBe('api-error');
+  });
+});
+
+describe('rewriter — local model + redaction', () => {
+  it('redacts known signals in model output', async () => {
+    mockedGetActiveApi.mockResolvedValue(null);
+    mockedGetActiveModelId.mockResolvedValue('t5-small-q8');
+    mockedIsDownloaded.mockResolvedValue(true);
+    mockedSendToOffscreen.mockResolvedValue({
+      ok: true,
+      suggestion: 'Hola, escríbeme a silca@gmail.com',
+    });
+
+    const signals = [
+      { category: 'email' as const, match: 'silca@gmail.com', severity: 'high' as const, start: 0, end: 15 },
+    ];
+
+    const result = await rewrite('Hola silca@gmail.com', signals, 'soft');
+
+    expect(mockedSendToOffscreen).toHaveBeenCalled();
+    expect(result.suggestion).not.toContain('silca@gmail.com');
+    expect(result.suggestion).toContain('[correo]');
+    expect(result.source).toBe('local');
   });
 });
 
