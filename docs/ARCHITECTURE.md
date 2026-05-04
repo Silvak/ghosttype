@@ -1,348 +1,471 @@
-# GhostType Architecture
+# GhostType — Arquitectura
 
 ## Overview
 
-GhostType is a **local-first** browser extension built on Manifest V3 (MV3). All analysis, inference, and storage logic runs on the user's device. There is no backend server, no telemetry endpoint, and no remote model.
+GhostType es una extensión de navegador **local-first** construida sobre Manifest V3 (MV3). Su propósito central es reescribir mensajes del usuario para eliminar información sensible, personal o rastreable antes de publicarlos en línea, preservando al máximo el sentido y el tono del mensaje original.
 
-The architecture is organized into three main components with clearly defined responsibilities:
+**Principios de diseño:**
 
-| Component | Internal Name | Technology | Responsibility |
-|---|---|---|---|
-| Content Script | **The Infiltrator** | WXT + DOM API | Observe text, inject UI into the page |
-| Inference Engine | **The Engine** | Transformers.js + WebGPU | Run ONNX models locally |
-| Local Storage | **The Vault** | Dexie.js + IndexedDB | Persist encrypted stylistic profiles |
+- Todo el procesamiento ocurre en el dispositivo del usuario. Ningún texto sale del navegador salvo que el usuario configure explícitamente una API externa.
+- La extensión debe ser rápida: detectar señales mientras el usuario escribe, reescribir bajo demanda.
+- El motor de reescritura es completamente controlado por el usuario: elige qué modelo local descargar o qué API externa usar; nada se descarga ni envía sin su confirmación explícita.
+- La persistencia se minimiza: solo se guardan configuraciones, el modelo cacheado y API keys ofuscadas. Nunca el contenido original.
 
 ---
 
-## Component Diagram
+## Componentes Principales
+
+
+| Componente     | Nombre Interno      | Tecnología                       | Responsabilidad                                            |
+| -------------- | ------------------- | -------------------------------- | ---------------------------------------------------------- |
+| Content Script | **The Infiltrator** | WXT + DOM API                    | Observar texto, inyectar UI de sugerencias en la página    |
+| Orquestador    | **Background SW**   | WXT Service Worker               | Coordinar el pipeline, gestionar ciclo de vida             |
+| Detector       | **The Scanner**     | RegExp precompiladas + Set       | Identificar señales de riesgo sin modelo de IA             |
+| Dispatcher     | **The Rewriter**    | TypeScript puro                  | Elegir entre ApiGateway o Local ONNX y devolver sugerencia |
+| API externa    | **The ApiGateway**  | fetch + adapters                 | Llamar a OpenAI / Anthropic / Gemini con prompt unificado  |
+| Almacenamiento | **The Vault**       | Dexie.js + IndexedDB + WebCrypto | Settings, caché del modelo y API keys ofuscadas            |
+
+
+---
+
+## Diagrama de Componentes
 
 ```mermaid
 flowchart TB
     subgraph browser [Chrome Browser]
-        subgraph ext [GhostType Extension - WXT MV3]
+        subgraph ext [GhostType Extension MV3]
             CS["The Infiltrator\nContent Script\ndefineContentScript()"]
-            BG["Background\nService Worker\ndefineBackground()"]
-            PP["Popup UI\nReact 19 + Tailwind v4"]
-            SP["Side Panel UI\nReact 19 + Tailwind v4"]
+            BG["Background SW\nOrquestador\ndefineBackground()"]
+            SC["The Scanner\nDetector Rápido\nRegExp precompiladas + Set"]
+            RW["The Rewriter\nDispatcher\nAPI o Local ONNX"]
+            AG["The ApiGateway\nOpenAI / Anthropic / Gemini"]
+            PP["Popup UI\nReact 19 + Tailwind v4\nModels + AI Provider + status"]
         end
-        subgraph page [Active Web Page]
-            TB["Textarea / Input\n(Reddit, Twitter, forums)"]
-            GS["Ghost Score Ring\nSVG ring injected into DOM"]
-            HL["Entity Highlights\nLeak Detector underlines"]
+        subgraph page [Página Web Activa]
+            TB["Textarea / Input\nReddit, Twitter, foros"]
+            SW["Suggestion Widget\nShadow DOM inline"]
         end
     end
 
-    subgraph local [Local Hardware - Zero Telemetry]
-        GPU["WebGPU\n(NVIDIA / integrated)"]
-        WASM["WASM fallback\n(no GPU)"]
-        ENG["The Engine\nTransformers.js 3.8\nONNX Runtime Web"]
-        DB["The Vault\nDexie 4.3\nIndexedDB"]
+    subgraph local [Hardware Local]
+        GPU["WebGPU"]
+        WASM["WASM Fallback"]
+        DB["The Vault\nDexie 4.3 / IndexedDB\nsettings + modelCache + apiSettings"]
     end
 
-    TB -->|"MutationObserver\n+ debounce 300ms"| CS
-    CS -->|"chrome.runtime.sendMessage"| BG
-    BG -->|"pipeline(task, model)"| ENG
-    ENG -->|"device: webgpu"| GPU
-    ENG -->|"fallback WASM"| WASM
-    BG <-->|"StyleProfile CRUD"| DB
-    BG -->|"GhostScore + LeakEntities"| CS
-    CS -->|"renders ring"| GS
-    CS -->|"highlights words"| HL
-    BG <-->|"state / config"| PP
-    BG <-->|"full panel"| SP
+    subgraph cloud [Red — solo si el usuario configura API]
+        EXT["OpenAI / Anthropic\n/ Gemini"]
+    end
+
+    TB -->|"MutationObserver + debounce 200ms"| CS
+    CS -->|"sendMessage(text, level)"| BG
+    BG -->|"scan(text, level)"| SC
+    SC -->|"ScanResult"| BG
+    BG -->|"rewrite(text, signals, level)"| RW
+    RW -->|"API activa"| AG
+    RW -->|"Modelo descargado"| GPU
+    RW -->|"Fallback WASM"| WASM
+    AG -->|"fetch"| EXT
+    BG <-->|"CRUD"| DB
+    BG -->|"ScanResult + sugerencia"| CS
+    CS -->|"inyecta"| SW
+    BG <-->|"estado + config"| PP
 ```
+
+
 
 ---
 
-## Detailed Data Flow
+## Flujo de Datos Detallado
 
-### 1. Text Capture (The Infiltrator)
+### 1. Captura de texto (The Infiltrator)
 
-The content script observes the active page DOM using a `MutationObserver`. When it detects changes in a `<textarea>` or `contenteditable` element:
+El content script observa el DOM activo con un `MutationObserver`. Al detectar cambios en un `<textarea>` o elemento `contenteditable`:
 
-1. Applies a **300ms debounce** to avoid flooding the background on every keystroke.
-2. Extracts plain text from the element.
-3. Sends the text to the Service Worker via `chrome.runtime.sendMessage`.
+1. Aplica un **debounce de 200ms** para no saturar el Service Worker en cada pulsación.
+2. Extrae el texto plano del elemento.
+3. Envía el texto al Service Worker con el nivel de privacidad actual: `{ text, level: 'soft' | 'medium' | 'strong' }`.
 
 ```
-Textarea keystroke → MutationObserver → debounce 300ms → sendMessage(text)
+Escritura → MutationObserver → debounce 200ms → sendMessage({ text, level })
 ```
 
-### 2. Analysis in the Service Worker (Background)
+### 2. Pipeline de análisis (Background SW)
 
-The Service Worker acts as the central orchestrator. Upon receiving a message with text:
+El Service Worker actúa como orquestador. Al recibir un mensaje:
 
-1. Calls **The Engine** to obtain embeddings and classifications.
-2. Queries **The Vault** to compare against the user's previous stylistic profile.
-3. Calculates the **Ghost Score** (0–100) based on stylistic perplexity.
-4. Runs the **Leak Detector** to identify critical entities.
-5. Returns the result to the content script.
-
-### 3. Local Inference (The Engine)
+1. Pasa el texto a **The Scanner** (detección instantánea, sin modelo).
+2. Si el nivel lo requiere o el usuario solicita reescritura, invoca **The Rewriter**.
+3. Devuelve al content script el resultado: señales detectadas + sugerencia de texto reescrito (o `null` si no hay engine configurado).
 
 ```mermaid
 sequenceDiagram
+    participant CS as Content Script
     participant BG as Background SW
-    participant TF as Transformers.js
-    participant GPU as WebGPU / WASM
+    participant SC as The Scanner
+    participant RW as The Rewriter
 
-    BG->>TF: pipeline("feature-extraction", modelId, { device: "webgpu" })
-    Note over TF: Loads ONNX from<br/>web_accessible_resources
-    TF->>GPU: ONNX inference
-    GPU-->>TF: Embedding tensor
-    TF-->>BG: Float32Array (style vector)
-    BG->>BG: Calculate cosine similarity vs base profile
-    BG-->>BG: GhostScore = f(perplexity, similarity)
+    CS->>BG: sendMessage({ text, level })
+    BG->>SC: scan(text, level)
+    SC-->>BG: ScanResult { signals[], riskScore }
+    alt reescritura solicitada o nivel >= medium con señales
+        BG->>RW: rewrite(text, signals, level)
+        RW-->>BG: { suggestion, source } | { suggestion: null, reason }
+    end
+    BG-->>CS: { signals, riskScore, suggestion }
 ```
 
-### 4. Persistence (The Vault)
 
-The Vault stores the user's **stylistic profile**: a collection of embedding vectors from previous texts. This profile never leaves the device.
+
+### 3. Detección rápida (The Scanner)
+
+The Scanner opera únicamente con reglas deterministas. Es la capa siempre disponible, incluso sin conexión y sin modelo cargado.
+
+**Optimizaciones v2:**
+
+- Todos los `RegExp` se compilan **una sola vez** al iniciar el Service Worker, no en cada llamada.
+- Los diccionarios grandes (ciudades, países, tecnologías, nombres) se almacenan como `Set<string>` para lookup O(1) en lugar de O(n) regex.
+- Los patrones activos se filtran según el nivel antes de ejecutar: `soft` activa ~30% de patrones, `strong` activa el 100%.
+
+Señales detectadas según el nivel activo:
+
+
+| Señal                                  | Suave | Medio | Fuerte |
+| -------------------------------------- | ----- | ----- | ------ |
+| Nombre propio (persona)                | ✓     | ✓     | ✓      |
+| Email / teléfono / URL personal        | ✓     | ✓     | ✓      |
+| Ciudad o país explícito                | —     | ✓     | ✓      |
+| Profesión o título académico           | —     | ✓     | ✓      |
+| Tecnologías y herramientas específicas | —     | ✓     | ✓      |
+| Expresiones temporales concretas       | —     | ✓     | ✓      |
+| Dialectos, modismos regionales         | —     | —     | ✓      |
+| Patrones de escritura individualizados | —     | —     | ✓      |
+
+
+El Scanner devuelve un `ScanResult` con las señales encontradas y un `riskScore` (0–100) estimado por reglas.
+
+### 4. Dispatcher de reescritura (The Rewriter)
+
+The Rewriter no ejecuta inferencia directamente. Decide qué engine usar y delega:
 
 ```
-New text → embedding → compare with profile → update profile → persist in IndexedDB
+¿Hay API configurada y activa?
+  → Sí: ApiGateway.rewrite(cfg, text, level)
+  → No: ¿Hay modelo local descargado y activo?
+       → Sí: localRewrite(modelEntry, text, signals, level) vía Transformers.js
+       → No: devuelve { suggestion: null, reason: 'no-engine-configured' }
 ```
+
+Reglas del dispatcher:
+
+- **Nunca** descarga modelos automáticamente. Si no hay ningún engine disponible, devuelve `null` y el widget muestra un CTA para configurar.
+- Timeout duro de **8 segundos** para cualquier inferencia (API o local). Si se supera, devuelve `{ suggestion: null, reason: 'timeout' }`.
+- Al devolver `null`, el widget sigue mostrando las señales detectadas por el Scanner; la reescritura simplemente no está disponible.
+
+```mermaid
+flowchart TD
+    START["rewrite(text, signals, level)"]
+    APICHK{"¿API activa?"}
+    MODCHK{"¿Modelo\ndescargado?"}
+    API["ApiGateway.rewrite()"]
+    LOCAL["localRewrite() via Transformers.js"]
+    NONE["null + reason: no-engine-configured"]
+
+    START --> APICHK
+    APICHK -->|"Sí"| API
+    APICHK -->|"No"| MODCHK
+    MODCHK -->|"Sí"| LOCAL
+    MODCHK -->|"No"| NONE
+```
+
+
+
+### 5. API Gateway (The ApiGateway)
+
+The ApiGateway hace la llamada a la API externa elegida por el usuario usando el mismo system prompt para todos los proveedores. La API key se descifra in-memory justo antes de la llamada y nunca se persiste en claro.
+
+**System prompt unificado (`PRIVACY_REWRITE_PROMPT`):**
+
+```typescript
+const PRIVACY_REWRITE_PROMPT = `
+You are a privacy assistant inside a browser extension.
+Rewrite the user's text to remove or generalize PII while preserving meaning and tone.
+
+Rules:
+- Replace personal names → generic alternatives ("someone", "a person", "they")
+- Generalize locations → ("a European city", "my country", "somewhere nearby")
+- Remove specific dates → keep rough timeframes ("recently", "a few years ago")
+- Replace specific tools/tech → categories ("a JS framework", "a cloud provider")
+- Do NOT add opinions or new information
+- Output ONLY the rewritten text, no preface, no quotes
+
+Privacy level: {level}
+- soft: only direct identifiers (names, emails, phones)
+- medium: also location, profession, specific tools
+- strong: maximize anonymity, remove all potentially identifying context
+`;
+```
+
+Proveedores y modelos por defecto:
+
+
+| Proveedor     | Modelo por defecto | Latencia típica |
+| ------------- | ------------------ | --------------- |
+| OpenAI        | `gpt-4o-mini`      | < 1.5s          |
+| Anthropic     | `claude-haiku-3-5` | < 1.5s          |
+| Google Gemini | `gemini-2.0-flash` | < 1.5s          |
+
+
+### 6. Catálogo de modelos locales
+
+El usuario elige un modelo del catálogo y lo descarga manualmente desde el popup. Solo puede activarse un modelo ya descargado.
+
+
+| id                | Label                        | Repo                        | Tamaño | Latencia WebGPU | Latencia WASM | Calidad |
+| ----------------- | ---------------------------- | --------------------------- | ------ | --------------- | ------------- | ------- |
+| `t5-small-q8`     | T5 Small (rápido)            | `Xenova/t5-small`           | ~30MB  | < 800ms         | < 2s          | básica  |
+| `lamini-77m-q8`   | LaMini-Flan-T5 77M (balance) | `Xenova/LaMini-Flan-T5-77M` | ~80MB  | < 1.5s          | < 4s          | media   |
+| `flan-t5-base-q8` | FLAN-T5 Base (calidad)       | `Xenova/flan-t5-base`       | ~120MB | < 3s            | < 8s          | alta    |
+
+
+> Las cifras de latencia son orientativas. Se confirmarán con benchmarks reales en Fase 2 sobre hardware variado. El timeout duro de 8s se aplica a todos los modelos en WASM; el usuario puede elegir según su hardware.
+
+### 7. UI de sugerencias (Suggestion Widget)
+
+El content script inyecta un widget flotante junto al textarea activo implementado con **DOM vanilla + Shadow DOM** (sin React en el content script, para evitar colisiones con versiones de React ya presentes en la página):
+
+- Badge de riesgo (verde / amarillo / rojo) con el `riskScore`.
+- Chips de las señales detectadas por The Scanner.
+- Sección de sugerencia reescrita si hay engine disponible.
+- Botón "Aplicar" que reemplaza el texto del textarea con la sugerencia.
+- Botón "Ignorar" que descarta la sugerencia.
+- Indicador de carga mientras The Rewriter procesa.
+- CTA "Configurar engine" si el Rewriter devuelve `no-engine-configured`.
+- UI minimalista ultra simple no saturar al usario, centrado en funcionalidad
 
 ---
 
-## Detailed Tech Stack
+## Niveles de Privacidad
 
-### WXT `0.20.18` — Extension Framework
+Configurables desde el popup y persistidos en The Vault.
 
-WXT is the core framework of the project. It replaces CRXJS (stalled development) and manages:
+### Suave (`soft`)
 
-- **File-based entrypoints**: the `src/entrypoints/` directory structure automatically defines what is included in the generated `manifest.json`.
-- **True HMR** for content scripts and background in development.
-- **Native Vite 5-7 support**, compatible with all ecosystem plugins.
-- **Auto-generated manifest** from the configuration in `wxt.config.ts`.
+- El Scanner detecta solo señales de alto riesgo directas: nombres propios, emails, teléfonos, URLs personales.
+- The Rewriter solo se activa si el usuario lo solicita manualmente.
+- Latencia percibida del Scanner: < 15ms.
+
+### Medio (`medium`) — por defecto
+
+- El Scanner detecta ubicaciones, profesiones, tecnologías y temporalidad.
+- The Rewriter se activa al detectar ≥ 2 señales o al solicitarlo el usuario.
+- El texto reescrito intenta mantener el tono y sentido original.
+
+### Fuerte (`strong`)
+
+- El Scanner activa todos los patrones disponibles incluyendo dialectos y modismos.
+- The Rewriter se activa con cualquier señal detectada.
+- Se aceptan más cambios en el texto para maximizar el anonimato.
+
+---
+
+## Stack Técnico
+
+### WXT `0.20.18` — Framework de extensiones
+
+WXT gestiona entrypoints, HMR y el manifest MV3 generado automáticamente.
 
 ```typescript
-// wxt.config.ts — manifest.json is generated from here
+// wxt.config.ts
 export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
   manifest: {
     permissions: ['activeTab', 'storage', 'sidePanel'],
+    web_accessible_resources: [
+      { resources: ['transformers/*'], matches: ['<all_urls>'] },
+    ],
   },
+  vite: () => ({
+    plugins: [tailwindcss()],
+    optimizeDeps: { exclude: ['@huggingface/transformers'] },
+  }),
 });
 ```
 
-**Why WXT and not CRXJS:**
-- CRXJS has had no active updates since 2023.
-- WXT has 9.3k stars on GitHub and 173k weekly downloads on npm.
-- WXT supports MV2 and MV3, Chrome, Firefox, Edge, and Safari from a single codebase.
+### Transformers.js `3.8.1` — Motor de inferencia local
 
----
-
-### Transformers.js `3.8.1` — The Engine
-
-Transformers.js runs ONNX models directly in the browser, without a server. It is the central piece of the stylometric analysis.
-
-**WebGPU configuration:**
-```typescript
-import { pipeline } from '@huggingface/transformers';
-
-const extractor = await pipeline(
-  'feature-extraction',
-  'Xenova/all-MiniLM-L6-v2',
-  { device: 'webgpu' }  // automatic fallback to WASM if no WebGPU
-);
-```
-
-**Planned models:**
-
-| Model | Task | Size | Usage |
-|---|---|---|---|
-| `Xenova/all-MiniLM-L6-v2` | Feature extraction | ~23MB | Stylistic embeddings |
-| `Xenova/bert-base-NER` | Token classification | ~64MB | Entity detection (Leak Detector) |
-| Custom SLM (Phase 3) | Text generation | ~100-300MB | Adversarial Rewriting |
-
-**Critical MV3 restriction (CSP):**
-
-Manifest V3 blocks dynamic loading of external scripts. WASM and ONNX files must be bundled with the extension and declared as `web_accessible_resources`. Path configuration in the background:
+Ejecuta los modelos ONNX del catálogo directamente en el navegador vía WebGPU o WASM.
 
 ```typescript
-import { env } from '@huggingface/transformers';
+// src/engine/rewriter.ts — carga lazy del modelo activo
+import { pipeline, env } from '@huggingface/transformers';
 
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('transformers/');
+
+async function localRewrite(modelEntry: ModelEntry, text: string, level: PrivacyLevel) {
+  const pipe = await pipeline('text2text-generation', modelEntry.repo, {
+    device: 'webgpu', // fallback automático a WASM
+    dtype: 'q8',
+  });
+  const result = await pipe(buildPrompt(text, level), {
+    max_new_tokens: Math.min(text.length * 2, 512),
+    num_beams: 1,
+  });
+  return result[0].generated_text;
+}
 ```
 
-**Why v3 and not v4:**
-- Transformers.js v4 is in preview (`@next` on npm), not a stable release.
-- v3.8.1 already has full WebGPU support with `device: 'webgpu'`.
-
----
+Los archivos ONNX/WASM se declaran como `web_accessible_resources` para cumplir con la CSP de MV3.
 
 ### Dexie.js `4.3.0` — The Vault
 
-Dexie is the IndexedDB wrapper that manages local storage of stylistic profiles.
-
-**Database schema:**
-
 ```typescript
-import Dexie, { Table } from 'dexie';
-
-interface StyleProfile {
-  id?: number;
-  sessionId: string;
-  embeddings: Float32Array[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface TextSample {
-  id?: number;
-  hash: string;       // text hash for deduplication
-  embedding: number[];
-  timestamp: Date;
-}
-
+// src/vault/schema.ts
 class GhostVault extends Dexie {
-  profiles!: Table<StyleProfile>;
-  samples!: Table<TextSample>;
+  settings!: Table<AppSettings>;
+  modelCache!: Table<ModelCacheEntry>;
+  apiSettings!: Table<ApiSettingsRow>;
 
   constructor() {
     super('ghosttype-vault');
     this.version(1).stores({
-      profiles: '++id, sessionId, updatedAt',
-      samples: '++id, hash, timestamp',
+      settings: '&key',
+      modelCache: '&modelId, cachedAt, sizeMB',
+      apiSettings: '&provider',
     });
   }
 }
 ```
 
-**Why Dexie v4:**
-- Native TypeScript API with full type inference.
-- Support for complex transactions and reactive queries.
-- Widely adopted (100k+ websites).
+The Vault almacena únicamente:
 
----
+- `settings`: toggle on/off, nivel activo, modelo activo, proveedor API activo.
+- `modelCache`: blobs ONNX descargados por el usuario.
+- `apiSettings`: API keys ofuscadas con AES-GCM (ver sección de seguridad).
+
+Nunca almacena el texto original del usuario.
 
 ### React `19.2.4` + Tailwind CSS `4.2.1`
 
-The popup and side panel UI uses React 19 with the new Tailwind v4 system.
+El popup usa React 19. El Suggestion Widget del content script usa DOM vanilla + Shadow DOM para aislamiento total de la página host.
 
-**Tailwind v4 — Key changes:**
+---
 
-Tailwind v4 removes the `tailwind.config.ts` and `postcss.config.js` files. Configuration is **CSS-first**:
+## Encriptación de API Keys
 
-```css
-/* src/assets/styles/global.css */
-@import "tailwindcss";
-
-/* Custom design tokens */
-@theme {
-  --color-ghost: oklch(0.7 0.15 200);
-  --color-danger: oklch(0.65 0.2 25);
-}
-```
-
-Integrated as a direct Vite plugin (no PostCSS):
+Las API keys se ofuscan en IndexedDB con **WebCrypto AES-GCM**. La master key se deriva de `chrome.runtime.id` con PBKDF2.
 
 ```typescript
-// wxt.config.ts
-import tailwindcss from '@tailwindcss/vite';
-
-export default defineConfig({
-  vite: () => ({
-    plugins: [tailwindcss()],
-  }),
-});
-```
-
-**Known limitation:** Tailwind v4 has issues with shadow roots, which is relevant for UI injected by the content script. The Ghost Score Ring UI and Leak Detector highlights will be implemented with vanilla CSS or a manual shadow DOM to avoid conflicts.
-
----
-
-## Security Model — Zero Telemetry
-
-GhostType upholds a total privacy promise:
-
-| Principle | Implementation |
-|---|---|
-| No network | No `fetch()` or `XMLHttpRequest` to external domains in production |
-| No analytics | No telemetry SDKs included (GA, Sentry, Mixpanel, etc.) |
-| No remote models | ONNX models are bundled with the extension or downloaded once to IndexedDB |
-| No remote logs | All errors are logged only to local `console` |
-| Encrypted data | Stylistic profiles in IndexedDB are stored with AES-GCM encryption via Web Crypto API |
-
-**Manifest permissions (minimum required):**
-
-```json
-{
-  "permissions": ["activeTab", "storage", "sidePanel"],
-  "host_permissions": []
+// src/vault/crypto.ts
+async function getMasterKey(): Promise<CryptoKey> {
+  const seed = chrome.runtime.id + '|ghosttype-v1';
+  const salt = new TextEncoder().encode('gt-salt-v1');
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(seed),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
 }
 ```
 
-No global `host_permissions` are requested. The content script only activates on the active tab.
+> **Aviso de seguridad**: esto es **ofuscación**, no seguridad real. Cualquier código con acceso al perfil del navegador puede derivar la misma key y descifrar. Es inevitable en MV3: la extensión necesita la key en claro para llamar a la API. El objetivo es evitar leaks triviales por inspección directa de IndexedDB, no proteger contra un atacante con acceso al sistema de archivos del usuario.
 
 ---
 
-## Directory Structure
+## Modelo de Seguridad — Zero Telemetry
+
+
+| Principio              | Implementación                                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Sin red por defecto    | No hay `fetch()` a dominios externos salvo que el usuario configure una API key                             |
+| Sin telemetría         | No se incluyen SDKs de analytics (GA, Sentry, Mixpanel, etc.)                                               |
+| Sin texto almacenado   | The Vault guarda solo settings, modelo cacheado y keys ofuscadas; nunca el contenido escrito por el usuario |
+| Sin perfil del usuario | No se construye ni mantiene ningún perfil estilométrico persistente                                         |
+| Permisos mínimos       | `activeTab` + `storage` + `sidePanel`. Sin `host_permissions` globales                                      |
+| API externa opt-in     | El usuario configura explícitamente proveedor + key; sin eso, todo es local                                 |
+
+
+---
+
+## Estructura de Directorios
 
 ```
 ghosttype/
   src/
-    entrypoints/              # WXT file-based entrypoints
-      background.ts           # Service Worker (defineBackground)
-      content.ts              # Content Script (defineContentScript)
-      popup/                  # Popup UI
+    entrypoints/
+      background.ts              # Service Worker — orquestador del pipeline
+      content.ts                 # Content Script — DOM observer + widget UI
+      popup/
         index.html
         main.tsx
-        App.tsx
-        style.css
-      sidepanel/              # Side Panel UI
-        index.html
-        main.tsx
-        App.tsx
-        style.css
-    components/               # Shared React components
-      ui/                     # GhostScoreRing, LeakBadge, etc.
-    engine/                   # The Engine
-      index.ts                # Engine public API
-      models.ts               # ONNX model configuration
-    vault/                    # The Vault
-      index.ts                # Vault public API
-      schema.ts               # Dexie schema
-    modules/                  # Pure business logic
-      ghostScore.ts           # Ghost Score calculation
-      leakDetector.ts         # Critical entity detection
-    utils/                    # Shared utilities
-    types/                    # Global TypeScript types
-      index.ts
-  assets/
-    styles/
-      global.css              # @import "tailwindcss" + @theme tokens
-  public/
-    icons/                    # Icons 16x16, 48x48, 128x128
+        App.tsx                  # Selector nivel, toggle, Models, AI Provider, EngineStatus
+    components/
+      ui/
+        SuggestionWidget.ts      # Widget DOM vanilla + Shadow DOM (sin React)
+        LevelSelector.tsx        # React — selector soft/medium/strong
+        RiskBadge.tsx            # React — badge de riesgo
+        ModelManager.tsx         # React — lista catálogo + botones Descargar/Activar
+        ApiSettings.tsx          # React — selector proveedor + campo API key + Test
+        EngineStatus.tsx         # React — badge del engine activo
+    engine/
+      rewriter.ts                # Dispatcher: API o Local ONNX
+      models.ts                  # MODEL_CATALOG con 3 modelos
+      model-manager.ts           # Descarga, borrado, activación de modelos
+      api-gateway.ts             # Adapters OpenAI / Anthropic / Gemini
+    scanner/
+      index.ts                   # The Scanner — API pública
+      rules.ts                   # RegExp precompiladas + Sets de diccionarios
+      patterns.ts                # Expresiones regulares reutilizables
+    vault/
+      index.ts                   # The Vault — API pública
+      schema.ts                  # Esquema Dexie (settings + modelCache + apiSettings)
+      crypto.ts                  # AES-GCM con PBKDF2 sobre runtime.id
+    types/
+      index.ts                   # ScanResult, Signal, PrivacyLevel, AppSettings,
+                                 # ModelEntry, ApiSettingsRow, RewriteResult
+    utils/
   docs/
-    ARCHITECTURE.md           # This document
+    ARCHITECTURE.md
     ROADMAP.md
   wxt.config.ts
   package.json
   tsconfig.json
-  .gitignore
-  README.md
-  LICENSE
 ```
 
 ---
 
-## Design Decisions
+## Decisiones de Diseño
 
-### Why a Service Worker as the orchestrator?
+### ¿Por qué las reglas solo detectan, no reescriben?
 
-In MV3, the background is an ephemeral (non-persistent) Service Worker. All heavy inference logic lives here because:
+La reescritura por sustitución de templates (reglas + diccionarios) produce texto con calidad baja: sustituciones mecánicas que rompen la gramática y el tono. El valor de la extensión es la reescritura fluida y contextual, que solo puede hacer un modelo. Las reglas son rápidas y siempre disponibles para la **detección** (< 15ms), pero la **reescritura** requiere modelo o API.
 
-1. The content script has limited access to browser APIs.
-2. The Service Worker can load and cache ONNX models between invocations.
-3. Centralizing the logic makes unit testing easier.
+### ¿Por qué descarga manual de modelos?
 
-### Why not use a Web Worker for inference?
+La descarga automática (lazy) del modelo en la primera reescritura tiene dos problemas: (1) el usuario no está informado de que se están descargando 30–120MB, y (2) no puede elegir el tradeoff calidad/latencia/tamaño que mejor se adapta a su hardware. La descarga manual desde el popup da control total al usuario y alinea con el principio de transparencia.
 
-Transformers.js supports Web Workers, but in the context of an MV3 extension, the Service Worker already acts as a worker separate from the content script. Adding another layer of workers would increase complexity without real benefit in this case.
+### ¿Por qué API externa opcional en lugar de solo local?
 
-### Why Dexie and not chrome.storage?
+Usuarios con hardware modesto o sin WebGPU experimentarán latencias de 4–8s en WASM. Una API externa (Gemini Flash, GPT-4o-mini) ofrece < 1.5s con calidad superior. Al ser opt-in y requerir la API key del propio usuario, no contradice el principio zero-telemetry: el usuario decide conscientemente enviar su texto a un proveedor externo.
 
-`chrome.storage.local` has a default limit of ~5MB. The embedding vectors of a stylistic profile can exceed that limit over time. IndexedDB has no practical limit for this use case.
+### ¿Por qué se eliminaron los perfiles estilométricos del MVP?
+
+Guardar embeddings históricos del texto del usuario implica acumular datos que, aunque locales, representan un riesgo de privacidad si el dispositivo se compromete. Además añade complejidad al MVP sin un beneficio claro en el flujo principal. El objetivo de GhostType en esta fase es eliminar señales rastreables en el texto activo, no medir "distancia estilométrica" del usuario respecto a su historial.
+
+### ¿Por qué el Suggestion Widget no usa React?
+
+El content script inyecta UI en páginas arbitrarias. React en un content script puede colisionar con versiones de React ya presentes en la página host. El widget se implementa con DOM vanilla + Shadow DOM para aislamiento total.
+
+### ¿Por qué encriptación de API keys es solo ofuscación?
+
+En MV3, no existe ningún mecanismo de almacenamiento seguro que el código de la extensión no pueda leer. Todo lo que la extensión descifra para llamar a la API, puede ser descifrado por cualquier código con acceso a la extensión. El AES-GCM con PBKDF2 evita únicamente la exposición trivial de la key en texto plano en IndexedDB; no protege contra un atacante con acceso al perfil del navegador.
