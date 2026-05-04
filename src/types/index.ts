@@ -70,3 +70,22 @@ export interface RewriteResult {
   source?: 'api' | 'local';
   reason?: RewriteReason;
 }
+
+export type RuntimeMessage =
+  | { type: 'scan'; text: string }
+  | { type: 'rewrite'; text: string }
+  | { type: 'apply'; text: string };
+
+export interface RuntimeScanResponse {
+  ok: true;
+  result: ScanResult;
+  suggestion?: string | null;
+  reason?: RewriteReason;
+}
+
+export interface RuntimeErrorResponse {
+  ok: false;
+  error: string;
+}
+
+export type RuntimeResponse = RuntimeScanResponse | RuntimeErrorResponse;

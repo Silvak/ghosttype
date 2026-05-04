@@ -1,46 +1,82 @@
 import { scan } from '../scanner/index.js';
 import { getEnabled, getLevel } from '../vault/index.js';
-import type { PrivacyLevel, ScanResult } from '../types/index.js';
+import { rewrite } from '../engine/rewriter.js';
+import type { PrivacyLevel, ScanResult, RuntimeMessage, RuntimeResponse } from '../types/index.js';
 
-type ScanRequest = { type: 'scan'; text: string; level?: PrivacyLevel };
-type ScanResponse = { ok: true; result: ScanResult } | { ok: false; error: string };
+// Minimum signal count that triggers automatic rewriting per level
+const AUTO_REWRITE_THRESHOLD: Record<PrivacyLevel, number> = {
+  soft: Infinity, // never auto-rewrite on soft; on-demand only
+  medium: 2,
+  strong: 1,
+};
 
 export default defineBackground(() => {
   chrome.runtime.onMessage.addListener(
-    (message: unknown, _sender, sendResponse: (r: ScanResponse) => void) => {
-      if (!isValidRequest(message)) return false;
+    (message: unknown, _sender, sendResponse: (r: RuntimeResponse) => void) => {
+      if (!isValidMessage(message)) return false;
 
-      void handleScan(message)
+      void dispatch(message)
         .then(response => sendResponse(response))
         .catch(err => {
           const error = err instanceof Error ? err.message : 'Unknown error';
-          console.error('[GhostType background] scan error:', error);
+          console.error('[GhostType background] error:', error);
           sendResponse({ ok: false, error });
         });
 
-      // Return true to keep the message channel open for the async sendResponse
-      return true;
+      return true; // keep the message channel open for async sendResponse
     },
   );
 });
 
-async function handleScan(message: ScanRequest): Promise<ScanResponse> {
+async function dispatch(message: RuntimeMessage): Promise<RuntimeResponse> {
   const enabled = await getEnabled();
-  if (!enabled) {
-    return { ok: false, error: 'disabled' };
+  if (!enabled) return { ok: false, error: 'disabled' };
+
+  const level = await getLevel();
+
+  if (message.type === 'scan') {
+    return handleScan(message.text, level);
   }
 
-  // Vault is the source of truth for the active level
-  const level = await getLevel();
-  const result = scan(message.text, level);
+  if (message.type === 'rewrite') {
+    return handleRewrite(message.text, level);
+  }
+
+  return { ok: false, error: `Unknown message type` };
+}
+
+async function handleScan(text: string, level: PrivacyLevel): Promise<RuntimeResponse> {
+  const result: ScanResult = scan(text, level);
+
+  const threshold = AUTO_REWRITE_THRESHOLD[level];
+  if (result.signals.length >= threshold) {
+    const rewriteResult = await rewrite(text, result.signals, level);
+    return {
+      ok: true,
+      result,
+      suggestion: rewriteResult.suggestion,
+      reason: rewriteResult.reason,
+    };
+  }
+
   return { ok: true, result };
 }
 
-function isValidRequest(msg: unknown): msg is ScanRequest {
-  return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    (msg as ScanRequest).type === 'scan' &&
-    typeof (msg as ScanRequest).text === 'string'
-  );
+async function handleRewrite(text: string, level: PrivacyLevel): Promise<RuntimeResponse> {
+  // On-demand rewrite: scan first to get signals, then rewrite
+  const result: ScanResult = scan(text, level);
+  const rewriteResult = await rewrite(text, result.signals, level);
+  return {
+    ok: true,
+    result,
+    suggestion: rewriteResult.suggestion,
+    reason: rewriteResult.reason,
+  };
+}
+
+function isValidMessage(msg: unknown): msg is RuntimeMessage {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as RuntimeMessage;
+  if (m.type === 'scan' || m.type === 'rewrite') return typeof m.text === 'string';
+  return false;
 }
