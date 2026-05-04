@@ -30,6 +30,11 @@ export default defineConfig({
         matches: ['<all_urls>'],
       },
     ],
+    // MV3 default CSP deshabilita la compilación WASM; ONNX Runtime necesita esto.
+    content_security_policy: {
+      extension_pages:
+        "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self';",
+    },
   },
   vite: () => ({
     plugins: [tailwindcss()],

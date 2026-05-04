@@ -13,10 +13,12 @@
 
 import { pipeline, env } from '@huggingface/transformers';
 
-// ONNX Runtime Web assets (ort-wasm-*.wasm / .mjs) are copied into public/transformers/
-// by `pnpm copy-assets` / postinstall — see scripts/copy-transformers-assets.mjs.
-// Declared as web_accessible_resources in wxt.config.ts.
+// ONNX Runtime Web (ort-wasm-*) en public/transformers/ (copia en prebuild) + WAR en manifest.
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('transformers/');
+// Sin crossOriginIsolation no hay SharedArrayBuffer para pthreads; un hilo evita fallos al compilar WASM.
+if (env.backends.onnx.wasm) {
+  env.backends.onnx.wasm.numThreads = 1;
+}
 env.allowRemoteModels = true;
 env.useBrowserCache = true;
 

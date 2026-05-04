@@ -19,8 +19,8 @@ export function friendlyDownloadError(message: string): string {
   }
   if (m.includes('wasm') || m.includes('onnx')) {
     return (
-      'El motor ONNX/WASM no pudo cargarse (revisa que la extensión incluya `public/transformers/` ' +
-      'y ejecuta `pnpm install` / recarga la extensión). ' +
+      'No se pudo iniciar el motor local (ONNX/WASM). Actualiza Chrome, recarga GhostType en ' +
+      'chrome://extensions y vuelve a pulsar Descargar. ' +
       `Detalle: ${detail}`
     );
   }

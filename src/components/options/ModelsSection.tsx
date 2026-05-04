@@ -89,13 +89,12 @@ export function ModelsSection() {
       <div>
         <h2 className="mb-1 text-base font-semibold text-zinc-100">Modelos locales</h2>
         <p className="text-sm text-zinc-400">
-          Descarga un modelo ONNX para reescribir texto localmente. Ningún texto sale de tu
-          navegador.
+          Al pulsar «Descargar» el modelo se descarga e instala solo en este navegador. Ningún
+          texto de tus publicaciones sale del dispositivo.
         </p>
         <p className="mt-2 text-xs leading-relaxed text-zinc-500">
-          Esta vista ya es el panel completo en pestaña. Si «Descargar» no hace nada, recarga la
-          extensión en <span className="text-zinc-400">chrome://extensions</span> y comprueba la
-          conexión a internet.
+          La primera descarga puede tardar según tu red. Si algo falla, comprueba la conexión y
+          recarga GhostType en <span className="text-zinc-400">chrome://extensions</span>.
         </p>
       </div>
 

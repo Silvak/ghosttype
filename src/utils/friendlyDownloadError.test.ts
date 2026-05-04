@@ -13,7 +13,7 @@ describe('friendlyDownloadError', () => {
     expect(out).toContain('ONNX/WASM');
     expect(out).toContain('Detalle:');
     expect(out).toContain('ort-wasm');
-    expect(out).toMatch(/^El motor ONNX\/WASM/);
+    expect(out).toMatch(/^No se pudo iniciar el motor local/);
   });
 
   it('mentions offscreen when message references it', () => {
