@@ -9,6 +9,11 @@ export default defineConfig({
     description: 'Anonymous Writing for the AI Era. Protect your linguistic fingerprint.',
     version: '0.1.0',
     permissions: ['activeTab', 'storage', 'sidePanel'],
+    icons: {
+      16: 'icons/icon-16.png',
+      48: 'icons/icon-48.png',
+      128: 'icons/icon-128.png',
+    },
     web_accessible_resources: [
       {
         resources: ['transformers/*'],

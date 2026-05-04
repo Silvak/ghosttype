@@ -28,8 +28,10 @@ export interface ScanResult {
   riskScore: number;
 }
 
+export type SettingKey = 'enabled' | 'level' | 'activeModelId' | 'activeApiProvider';
+
 export interface AppSettings {
-  key: string;
+  key: SettingKey;
   value: unknown;
 }
 
