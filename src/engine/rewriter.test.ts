@@ -6,9 +6,8 @@ vi.mock('../vault/index.js', () => ({
   getActiveModelId: vi.fn(),
 }));
 
-vi.mock('./model-manager.js', () => ({
+vi.mock('./model-manager.bg.js', () => ({
   isDownloaded: vi.fn(),
-  configureWasmPaths: vi.fn(),
 }));
 
 vi.mock('./api-gateway.js', () => ({
@@ -28,7 +27,7 @@ vi.mock('@huggingface/transformers', () => ({
 
 import { rewrite } from './rewriter.js';
 import { getActiveApi, getActiveModelId } from '../vault/index.js';
-import { isDownloaded } from './model-manager.js';
+import { isDownloaded } from './model-manager.bg.js';
 import * as apiGateway from './api-gateway.js';
 
 const mockedGetActiveApi = vi.mocked(getActiveApi);

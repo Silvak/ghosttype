@@ -16,14 +16,16 @@ GhostType es una extensión de navegador **local-first** construida sobre Manife
 ## Componentes Principales
 
 
-| Componente     | Nombre Interno      | Tecnología                       | Responsabilidad                                            |
-| -------------- | ------------------- | -------------------------------- | ---------------------------------------------------------- |
-| Content Script | **The Infiltrator** | WXT + DOM API                    | Observar texto, inyectar UI de sugerencias en la página    |
-| Orquestador    | **Background SW**   | WXT Service Worker               | Coordinar el pipeline, gestionar ciclo de vida             |
-| Detector       | **The Scanner**     | RegExp precompiladas + Set       | Identificar señales de riesgo sin modelo de IA             |
-| Dispatcher     | **The Rewriter**    | TypeScript puro                  | Elegir entre ApiGateway o Local ONNX y devolver sugerencia |
-| API externa    | **The ApiGateway**  | fetch + adapters                 | Llamar a OpenAI / Anthropic / Gemini con prompt unificado  |
-| Almacenamiento | **The Vault**       | Dexie.js + IndexedDB + WebCrypto | Settings, caché del modelo y API keys ofuscadas            |
+| Componente        | Nombre Interno      | Tecnología                       | Responsabilidad                                                        |
+| ----------------- | ------------------- | -------------------------------- | ---------------------------------------------------------------------- |
+| Content Script    | **The Infiltrator** | WXT + DOM API                    | Observar texto, inyectar UI de sugerencias en la página                |
+| Orquestador       | **Background SW**   | WXT Service Worker               | Coordinar el pipeline, gestionar ciclo de vida                         |
+| Detector          | **The Scanner**     | RegExp precompiladas + Set       | Identificar señales de riesgo sin modelo de IA                         |
+| Dispatcher        | **The Rewriter**    | TypeScript puro                  | Elegir entre ApiGateway o Local ONNX y devolver sugerencia             |
+| Motor local       | **Offscreen Doc**   | MV3 Offscreen + Transformers.js  | Ejecutar inferencia ONNX (WebGPU/WASM) fuera del Service Worker        |
+| Bridge offscreen  | **OffscreenBridge** | chrome.offscreen + sendMessage   | Crear/reusar el offscreen doc; enviar comandos download/rewrite/remove |
+| API externa       | **The ApiGateway**  | fetch + adapters                 | Llamar a OpenAI / Anthropic / Gemini con prompt unificado              |
+| Almacenamiento    | **The Vault**       | Dexie.js + IndexedDB + WebCrypto | Settings, caché del modelo y API keys ofuscadas                        |
 
 
 ---
@@ -301,6 +303,7 @@ Ejecuta los modelos ONNX del catálogo directamente en el navegador vía WebGPU 
 // src/engine/rewriter.ts — carga lazy del modelo activo
 import { pipeline, env } from '@huggingface/transformers';
 
+// ort-wasm*.wasm|mjs en public/transformers/ (copiados desde onnxruntime-web/dist)
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('transformers/');
 
 async function localRewrite(modelEntry: ModelEntry, text: string, level: PrivacyLevel) {
@@ -405,22 +408,36 @@ ghosttype/
     entrypoints/
       background.ts              # Service Worker — orquestador del pipeline
       content.ts                 # Content Script — DOM observer + widget UI
+      offscreen/
+        index.html               # Offscreen Document (MV3) — punto de entrada
+        main.ts                  # Handlers: download / rewrite / remove vía Transformers.js
       popup/
         index.html
         main.tsx
-        App.tsx                  # Selector nivel, toggle, Models, AI Provider, EngineStatus
+        App.tsx                  # Toggle, LevelSelector, EngineStatus, botón "Opciones"
+      options/
+        index.html
+        main.tsx
+        App.tsx                  # General / Modelos / API / About
     components/
       ui/
         SuggestionWidget.ts      # Widget DOM vanilla + Shadow DOM (sin React)
         LevelSelector.tsx        # React — selector soft/medium/strong
-        RiskBadge.tsx            # React — badge de riesgo
-        ModelManager.tsx         # React — lista catálogo + botones Descargar/Activar
-        ApiSettings.tsx          # React — selector proveedor + campo API key + Test
-        EngineStatus.tsx         # React — badge del engine activo
+        EngineStatus.tsx         # React — badge del engine activo (lee vault en tiempo real)
+        Toggle.tsx               # React — interruptor on/off
+      options/
+        GeneralSection.tsx       # Sección de ajustes generales
+        ModelsSection.tsx        # Lista catálogo + botones Descargar/Activar
+        ApiSection.tsx           # Selector proveedor + campo API key + Test
+        EngineStatusCard.tsx     # Re-exporta EngineStatus (compat)
+        Sidebar.tsx              # Navegación lateral de opciones
+        AboutSection.tsx         # Información del proyecto
     engine/
-      rewriter.ts                # Dispatcher: API o Local ONNX
+      rewriter.ts                # Dispatcher: API o Local ONNX vía offscreen
       models.ts                  # MODEL_CATALOG con 3 modelos
-      model-manager.ts           # Descarga, borrado, activación de modelos
+      model-manager.bg.ts        # Descarga/borrado/activación (solo SW) vía OffscreenBridge
+      model-manager.client.ts    # UI opciones → mensajes al SW
+      offscreen-bridge.ts        # ensureOffscreen + sendToOffscreen + downloadViaOffscreen
       api-gateway.ts             # Adapters OpenAI / Anthropic / Gemini
     scanner/
       index.ts                   # The Scanner — API pública
@@ -434,9 +451,14 @@ ghosttype/
       index.ts                   # ScanResult, Signal, PrivacyLevel, AppSettings,
                                  # ModelEntry, ApiSettingsRow, RewriteResult
     utils/
+  scripts/
+    copy-transformers-assets.mjs # Copia ort-wasm* desde onnxruntime-web/dist → public/transformers/
   docs/
     ARCHITECTURE.md
     ROADMAP.md
+  public/
+    transformers/                # WASM de ONNX Runtime (generado por predev/prebuild)
+    icons/
   wxt.config.ts
   package.json
   tsconfig.json
@@ -445,6 +467,10 @@ ghosttype/
 ---
 
 ## Decisiones de Diseño
+
+### ¿Por qué el motor local usa un Offscreen Document?
+
+El Background Service Worker (SW) de MV3 carece de APIs DOM necesarias para `@huggingface/transformers`: sin `WebGPU`, sin `SharedArrayBuffer` con los headers COOP/COEP correctos, sin Cache API fiable. El **Offscreen Document** es una página HTML oculta que sí tiene acceso completo al DOM y puede ejecutar WebAssembly/WebGPU. El SW crea y reutiliza un único offscreen doc (`offscreen.html`) vía `chrome.offscreen.createDocument` y se comunica con él mediante `chrome.runtime.sendMessage`. Los archivos WASM de ONNX Runtime se sirven desde `public/transformers/` (copiados en `predev`/`prebuild` desde `onnxruntime-web/dist`, vía `scripts/copy-transformers-assets.mjs`) y se declaran como `web_accessible_resources` para cumplir la CSP de MV3.
 
 ### ¿Por qué las reglas solo detectan, no reescriben?
 

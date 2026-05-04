@@ -107,6 +107,10 @@ pnpm install
 pnpm dev
 ```
 
+`pnpm install` runs `postinstall`, which copies ONNX/WASM assets from `@huggingface/transformers` into `public/transformers/` (required for local model downloads). If that step fails, run `pnpm copy-assets` manually after fixing `node_modules`.
+
+The extension requests the `tabs` permission so the popup and the in-page widget can open the full **options** UI in a normal browser tab (`options.html#models`, etc.), instead of relying on the narrow embedded options panel.
+
 ### Loading the Extension in Chrome
 
 1. Run `pnpm dev` — WXT builds the extension into `.output/chrome-mv3/`

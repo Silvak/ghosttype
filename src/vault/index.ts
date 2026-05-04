@@ -69,6 +69,10 @@ export async function setActiveProvider(provider: ApiProvider): Promise<void> {
   await setSetting('activeApiProvider', provider);
 }
 
+export async function clearActiveProvider(): Promise<void> {
+  await setSetting('activeApiProvider', null);
+}
+
 export async function setApi(
   provider: ApiProvider,
   plainKey: string,

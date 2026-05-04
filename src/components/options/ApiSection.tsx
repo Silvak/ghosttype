@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { setApi, clearApi, getActiveApi, getActiveProvider } from '../../vault/index.js';
+import { setApi, clearApi, getActiveApi, getActiveProvider, clearActiveProvider } from '../../vault/index.js';
 import { testConnection } from '../../engine/api-gateway.js';
 import type { ActiveApiConfig } from '../../vault/index.js';
 
@@ -7,7 +7,7 @@ type Provider = 'openai' | 'anthropic' | 'gemini';
 
 const PROVIDERS: { id: Provider; label: string; defaultModel: string; placeholder: string }[] = [
   { id: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o-mini', placeholder: 'sk-...' },
-  { id: 'anthropic', label: 'Anthropic', defaultModel: 'claude-haiku-3-5', placeholder: 'sk-ant-...' },
+  { id: 'anthropic', label: 'Anthropic', defaultModel: 'claude-3-5-haiku-latest', placeholder: 'sk-ant-...' },
   { id: 'gemini', label: 'Google Gemini', defaultModel: 'gemini-2.0-flash', placeholder: 'AIza...' },
 ];
 
@@ -96,7 +96,12 @@ export function ApiSection() {
         <input
           type="checkbox"
           checked={enabled}
-          onChange={e => setEnabled(e.target.checked)}
+          onChange={async e => {
+            setEnabled(e.target.checked);
+            if (!e.target.checked) {
+              await clearActiveProvider();
+            }
+          }}
           className="h-4 w-4 accent-emerald-500"
         />
       </label>

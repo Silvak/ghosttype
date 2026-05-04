@@ -13,7 +13,10 @@
     "zip:firefox": "wxt zip -b firefox",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "wxt prepare"
+    "copy-assets": "node scripts/copy-transformers-assets.mjs",
+    "postinstall": "wxt prepare && node scripts/copy-transformers-assets.mjs",
+    "predev": "node scripts/copy-transformers-assets.mjs",
+    "prebuild": "node scripts/copy-transformers-assets.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

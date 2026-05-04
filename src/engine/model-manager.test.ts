@@ -11,29 +11,28 @@ vi.mock('../vault/index.js', () => ({
   getAllModelCache: vi.fn(),
 }));
 
-// Mock Transformers.js
-vi.mock('@huggingface/transformers', () => ({
-  pipeline: vi.fn(),
-  env: { backends: { onnx: { wasm: { wasmPaths: '' } } } },
+// Mock offscreen bridge so tests never hit real chrome APIs
+vi.mock('./offscreen-bridge.js', () => ({
+  downloadViaOffscreen: vi.fn(),
+  sendToOffscreen: vi.fn(),
 }));
 
-// Mock chrome for configureWasmPaths
-(globalThis as unknown as Record<string, unknown>).chrome = {
-  runtime: { getURL: (path: string) => `chrome-extension://test/${path}` },
-};
-
-import { list, setActive, isDownloaded } from './model-manager.js';
+import { list, setActive, isDownloaded, download } from './model-manager.bg.js';
 import {
   getActiveModelId,
   setActiveModel,
+  addModelCache,
   getAllModelCache,
   getModelCache,
 } from '../vault/index.js';
+import { downloadViaOffscreen } from './offscreen-bridge.js';
 
 const mockedGetActiveModelId = vi.mocked(getActiveModelId);
 const mockedSetActiveModel = vi.mocked(setActiveModel);
+const mockedAddModelCache = vi.mocked(addModelCache);
 const mockedGetAllModelCache = vi.mocked(getAllModelCache);
 const mockedGetModelCache = vi.mocked(getModelCache);
+const mockedDownloadViaOffscreen = vi.mocked(downloadViaOffscreen);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -72,6 +71,36 @@ describe('model-manager — list()', () => {
     const lamini = entries.find(e => e.id === 'lamini-77m-q8')!;
 
     expect(lamini.status).toBe('active');
+  });
+});
+
+describe('model-manager — download()', () => {
+  it('calls downloadViaOffscreen and persists cache entry on success', async () => {
+    mockedDownloadViaOffscreen.mockResolvedValue(undefined);
+    mockedAddModelCache.mockResolvedValue(undefined);
+
+    const onProgress = vi.fn();
+    await download('t5-small-q8', onProgress);
+
+    expect(mockedDownloadViaOffscreen).toHaveBeenCalledWith(
+      't5-small-q8',
+      'Xenova/t5-small',
+      'q8',
+      expect.any(Function),
+    );
+    expect(mockedAddModelCache).toHaveBeenCalledWith('t5-small-q8', 30);
+    expect(onProgress).toHaveBeenCalledWith('t5-small-q8', 100);
+  });
+
+  it('throws and cleans up on offscreen error', async () => {
+    mockedDownloadViaOffscreen.mockRejectedValue(new Error('network error'));
+
+    await expect(download('t5-small-q8')).rejects.toThrow('network error');
+    expect(mockedAddModelCache).not.toHaveBeenCalled();
+  });
+
+  it('throws for unknown model id', async () => {
+    await expect(download('unknown-model')).rejects.toThrow('not found in catalog');
   });
 });
 

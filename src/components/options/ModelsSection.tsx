@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { MODEL_CATALOG } from '../../engine/models.js';
-import { list, download, remove, setActive } from '../../engine/model-manager.js';
-import type { ModelListEntry } from '../../engine/model-manager.js';
+import { list, download, remove, setActive } from '../../engine/model-manager.client.js';
+import type { ModelListEntry } from '../../types/index.js';
+import { friendlyDownloadError } from '../../utils/friendlyDownloadError.js';
 
 const QUALITY_LABEL = {
   basic: 'Básica',
@@ -11,9 +12,18 @@ const QUALITY_LABEL = {
 
 export function ModelsSection() {
   const [models, setModels] = useState<ModelListEntry[]>([]);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [listError, setListError] = useState<string | null>(null);
 
   const refreshList = useCallback(async () => {
-    setModels(await list());
+    try {
+      setListError(null);
+      setModels(await list());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setListError(msg);
+      setModels([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -21,7 +31,12 @@ export function ModelsSection() {
   }, [refreshList]);
 
   async function handleDownload(id: string) {
-    // Optimistically mark as downloading
+    setErrors(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+
     setModels(prev =>
       prev.map(m => (m.id === id ? { ...m, status: 'downloading', progress: 0 } : m)),
     );
@@ -32,19 +47,41 @@ export function ModelsSection() {
       });
       await refreshList();
     } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
       console.error('[GhostType options] download failed:', err);
+      setErrors(prev => ({ ...prev, [id]: friendlyDownloadError(raw) }));
       await refreshList();
     }
   }
 
   async function handleRemove(id: string) {
-    await remove(id);
-    await refreshList();
+    setErrors(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    try {
+      await remove(id);
+      await refreshList();
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      setErrors(prev => ({ ...prev, [id]: raw }));
+    }
   }
 
   async function handleActivate(id: string) {
-    await setActive(id);
-    await refreshList();
+    setErrors(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    try {
+      await setActive(id);
+      await refreshList();
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      setErrors(prev => ({ ...prev, [id]: raw }));
+    }
   }
 
   return (
@@ -55,7 +92,18 @@ export function ModelsSection() {
           Descarga un modelo ONNX para reescribir texto localmente. Ningún texto sale de tu
           navegador.
         </p>
+        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+          Esta vista ya es el panel completo en pestaña. Si «Descargar» no hace nada, recarga la
+          extensión en <span className="text-zinc-400">chrome://extensions</span> y comprueba la
+          conexión a internet.
+        </p>
       </div>
+
+      {listError && (
+        <p className="rounded-lg border border-red-900/50 bg-red-950/35 px-3 py-2 text-sm text-red-200">
+          {listError}
+        </p>
+      )}
 
       <div className="flex flex-col gap-3">
         {MODEL_CATALOG.map(catalogEntry => {
@@ -63,6 +111,8 @@ export function ModelsSection() {
             ...catalogEntry,
             status: 'not-downloaded' as const,
           };
+
+          const err = errors[m.id];
 
           return (
             <article
@@ -118,6 +168,12 @@ export function ModelsSection() {
                     />
                   </div>
                 </div>
+              )}
+
+              {err && (
+                <p className="mb-3 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+                  {err}
+                </p>
               )}
 
               <div className="flex gap-2">

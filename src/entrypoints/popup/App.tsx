@@ -2,21 +2,11 @@ import { useEffect, useState } from 'react';
 import { Toggle } from '../../components/ui/Toggle.js';
 import { LevelSelector } from '../../components/ui/LevelSelector.js';
 import { EngineStatus } from '../../components/ui/EngineStatus.js';
-import { ModelManager } from '../../components/ui/ModelManager.js';
-import { ApiSettings } from '../../components/ui/ApiSettings.js';
 import { getEnabled, setEnabled, getLevel, setLevel } from '../../vault/index.js';
+import { openOptionsToSection } from '../../utils/navigate-options.js';
 import type { PrivacyLevel } from '../../types/index.js';
 
-type Tab = 'general' | 'models' | 'api';
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'models', label: 'Modelos' },
-  { id: 'api', label: 'API' },
-];
-
 export function App() {
-  const [tab, setTab] = useState<Tab>('general');
   const [enabled, setEnabledState] = useState(true);
   const [level, setLevelState] = useState<PrivacyLevel>('medium');
   const [loaded, setLoaded] = useState(false);
@@ -40,41 +30,32 @@ export function App() {
   }
 
   return (
-    <main className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-base font-semibold text-zinc-100">GhostType</span>
-          <EngineStatus status="none" />
+    <main className="flex h-full min-h-0 flex-col gap-0">
+      <header className="flex shrink-0 flex-col gap-2 border-b border-zinc-800 px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-sm font-semibold text-zinc-100">GhostType</span>
+            <EngineStatus />
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={() => void openOptionsToSection('general')}
+              className="rounded-md border border-zinc-600 bg-zinc-800/60 px-2.5 py-1.5 text-[11px] font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
+              title="Ajustes generales, enlace a esta página, etc."
+            >
+              Más ajustes
+            </button>
+            <Toggle checked={enabled} onChange={onToggle} label="Activar" />
+          </div>
         </div>
-        <Toggle checked={enabled} onChange={onToggle} label="Activar GhostType" />
       </header>
 
-      <nav className="flex border-b border-zinc-800 bg-zinc-900/40">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-              tab === t.id
-                ? 'border-b-2 border-emerald-500 text-zinc-100'
-                : 'text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      <section className="flex-1 overflow-y-auto px-4 py-4">
+      <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
         {!loaded ? (
           <p className="text-xs text-zinc-500">Cargando…</p>
-        ) : tab === 'general' ? (
-          <LevelSelector value={level} onChange={onLevelChange} />
-        ) : tab === 'models' ? (
-          <ModelManager />
         ) : (
-          <ApiSettings />
+          <LevelSelector value={level} onChange={onLevelChange} />
         )}
       </section>
     </main>

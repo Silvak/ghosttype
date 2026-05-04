@@ -8,7 +8,13 @@ export default defineConfig({
     name: 'GhostType',
     description: 'Anonymous Writing for the AI Era. Protect your linguistic fingerprint.',
     version: '0.1.0',
-    permissions: ['activeTab', 'storage', 'sidePanel'],
+    permissions: ['activeTab', 'storage', 'sidePanel', 'offscreen', 'tabs'],
+    host_permissions: [
+      'https://huggingface.co/*',
+      'https://*.huggingface.co/*',
+      'https://hf.co/*',
+      'https://*.hf.co/*',
+    ],
     options_ui: {
       page: 'options.html',
       open_in_tab: true,

@@ -8,8 +8,8 @@ Roadmap organizado en tres fases progresivas. Cada fase produce un artefacto fun
 
 | Fase | Nombre | Estado | Objetivo |
 |---|---|---|---|
-| Fase 1 | Detección y sugerencias básicas | En Progreso | Extensión funcional con detector por reglas y UI de sugerencias |
-| Fase 2 | Reescritor híbrido (Local ONNX + API opcional) | Pendiente | Reescritura local con catálogo de modelos ONNX de descarga manual + ApiGateway opcional |
+| Fase 1 | Detección y sugerencias básicas | Completada | Extensión funcional con detector por reglas y UI de sugerencias |
+| Fase 2 | Reescritor híbrido (Local ONNX + API opcional) | En Progreso | Reescritura local con catálogo de modelos ONNX de descarga manual + ApiGateway opcional |
 | Fase 3 | Pulido, calidad y publicación | Pendiente | Producto completo, controles finos y publicación en stores |
 
 ---
@@ -111,9 +111,17 @@ Roadmap organizado en tres fases progresivas. Cada fase produce un artefacto fun
 
 **Criterio de éxito:** El usuario puede descargar un modelo desde el popup, escribir en Reddit/Twitter, pulsar "Reescribir" y recibir una sugerencia. O bien puede configurar una API key y recibir una sugerencia vía API. El widget muestra un CTA claro si no hay ningún engine configurado.
 
+### Offscreen Document (nuevo — requerido para MV3)
+
+- Crear `src/entrypoints/offscreen/index.html` + `main.ts` _(hecho)_
+- El documento offscreen aloja `@huggingface/transformers`; el SW nunca importa la librería _(hecho)_
+- `src/engine/offscreen-bridge.ts`: `ensureOffscreen`, `sendToOffscreen`, `downloadViaOffscreen` _(hecho)_
+- Copiar WASM assets (`ort-wasm*` desde `onnxruntime-web/dist`) a `public/transformers/` mediante `scripts/copy-transformers-assets.mjs` _(hecho)_
+- Añadir permiso `offscreen` al manifest vía `wxt.config.ts` _(hecho)_
+
 ### Catálogo de modelos
 
-- Crear `src/engine/models.ts` con `MODEL_CATALOG`:
+- Crear `src/engine/models.ts` con `MODEL_CATALOG` _(hecho)_:
   - `t5-small-q8`: `Xenova/t5-small` INT8, ~30MB, balance velocidad/calidad básica
   - `lamini-77m-q8`: `Xenova/LaMini-Flan-T5-77M` INT8, ~80MB, calidad media
   - `flan-t5-base-q8`: `Xenova/flan-t5-base` INT8, ~120MB, calidad alta
@@ -122,10 +130,10 @@ Roadmap organizado en tres fases progresivas. Cada fase produce un artefacto fun
 
 ### Model Manager — descarga manual
 
-- Crear `src/engine/model-manager.ts` con:
+- Crear `src/engine/model-manager.ts` _(hecho)_:
   - `list()`: devuelve catálogo con estado `downloaded | not-downloaded` por modelo
-  - `download(id, onProgress)`: descarga el modelo vía Transformers.js y lo persiste en `modelCache`
-  - `remove(id)`: borra el blob de IndexedDB y limpia la entrada
+  - `download(id, onProgress)`: delega al offscreen doc vía `downloadViaOffscreen`; persiste en vault al terminar
+  - `remove(id)`: envía `offscreen:remove` para evictar de memoria y Cache API; luego limpia vault
   - `setActive(id)`: solo permite activar modelos ya descargados; persiste `activeModelId` en settings
   - `getActive()`: devuelve el `ModelEntry` activo o `null`
   - `isDownloaded(id)`: consulta IndexedDB

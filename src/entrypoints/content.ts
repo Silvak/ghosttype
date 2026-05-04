@@ -109,6 +109,7 @@ export default defineContentScript({
             result: response.result,
             suggestion: response.suggestion,
             reason: response.reason,
+            errorDetail: response.errorDetail,
           });
         }
       }
@@ -133,6 +134,7 @@ export default defineContentScript({
           result: response.result,
           suggestion: response.suggestion,
           reason: response.reason,
+          errorDetail: response.errorDetail,
         });
       } else if (response.error === 'disabled') {
         widget.hide();

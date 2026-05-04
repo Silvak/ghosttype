@@ -1,4 +1,4 @@
-import type { Section } from '../../entrypoints/options/App.js';
+import type { Section } from '../../utils/navigate-options.js';
 
 const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: 'general', label: 'General', icon: '⚙' },

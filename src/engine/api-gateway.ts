@@ -69,7 +69,7 @@ async function callAnthropic(cfg: ActiveApiConfig, text: string, level: PrivacyL
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: cfg.model ?? 'claude-haiku-3-5',
+        model: cfg.model ?? 'claude-3-5-haiku-latest',
         max_tokens: Math.min(text.length * 3, 1024),
         system: buildPrompt(level),
         messages: [{ role: 'user', content: text }],
@@ -126,9 +126,9 @@ export async function rewrite(
     if (err instanceof Error && err.name === 'AbortError') {
       return { suggestion: null, reason: 'timeout' };
     }
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('[GhostType api-gateway] error:', message);
-    return { suggestion: null, reason: 'api-error' };
+    const errorDetail = err instanceof Error ? err.message : String(err);
+    console.error('[GhostType api-gateway] error:', errorDetail);
+    return { suggestion: null, reason: 'api-error', errorDetail };
   }
 }
 

@@ -229,6 +229,7 @@ export interface WidgetUpdatePayload {
   result: ScanResult;
   suggestion?: string | null;
   reason?: RewriteReason;
+  errorDetail?: string;
   busy?: boolean;
 }
 
@@ -355,7 +356,8 @@ export class SuggestionWidget {
     ctaBtn.id = 'cta-btn';
     ctaBtn.textContent = 'Configurar';
     ctaBtn.addEventListener('click', () => {
-      chrome.runtime.openOptionsPage();
+      const url = chrome.runtime.getURL('options.html#models');
+      void chrome.tabs.create({ url, active: true });
     });
 
     this.noEngineCta.appendChild(ctaText);
@@ -394,7 +396,7 @@ export class SuggestionWidget {
     )
       return;
 
-    const { result, suggestion, reason, busy } = payload;
+    const { result, suggestion, reason, errorDetail, busy } = payload;
 
     this.widgetEl.classList.remove('hidden');
 
@@ -439,6 +441,15 @@ export class SuggestionWidget {
 
       if (reason === 'no-engine-configured') {
         this.noEngineCta.classList.add('visible');
+        this.rewriteBtn.style.display = 'none';
+      } else if (reason === 'api-error' || reason === 'timeout') {
+        // Show error detail in the CTA area
+        this.noEngineCta.classList.add('visible');
+        const ctaTextEl = this.noEngineCta.querySelector('#cta-text');
+        if (ctaTextEl) {
+          const short = reason === 'timeout' ? 'Tiempo de espera agotado' : 'Error de API';
+          ctaTextEl.textContent = errorDetail ? `${short}: ${errorDetail.slice(0, 80)}` : short;
+        }
         this.rewriteBtn.style.display = 'none';
       } else if (result.signals.length > 0) {
         // Has signals but no auto-rewrite → show manual button

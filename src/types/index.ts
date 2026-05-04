@@ -48,6 +48,31 @@ export interface ModelEntry {
   quality: 'basic' | 'medium' | 'high';
 }
 
+export type ModelStatus = 'not-downloaded' | 'downloading' | 'downloaded' | 'active';
+
+export interface ModelListEntry extends ModelEntry {
+  status: ModelStatus;
+  progress?: number;
+}
+
+/** Service worker ↔ options page — model lifecycle */
+export type ModelManagerRequest =
+  | { type: 'model:list' }
+  | { type: 'model:download'; modelId: string }
+  | { type: 'model:remove'; modelId: string }
+  | { type: 'model:setActive'; modelId: string };
+
+export type ModelManagerResponse =
+  | { ok: true; models?: ModelListEntry[] }
+  | { ok: false; error: string };
+
+/** Broadcast from background during download (progress 0–100) */
+export interface ModelProgressMessage {
+  type: 'model:progress';
+  modelId: string;
+  progress: number;
+}
+
 export interface ModelCacheEntry {
   modelId: string;
   cachedAt: number;
@@ -69,6 +94,8 @@ export interface RewriteResult {
   suggestion: string | null;
   source?: 'api' | 'local';
   reason?: RewriteReason;
+  /** Provider or model error message for UI diagnostics */
+  errorDetail?: string;
 }
 
 export type RuntimeMessage =
@@ -81,6 +108,7 @@ export interface RuntimeScanResponse {
   result: ScanResult;
   suggestion?: string | null;
   reason?: RewriteReason;
+  errorDetail?: string;
 }
 
 export interface RuntimeErrorResponse {
